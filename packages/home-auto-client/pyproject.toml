@@ -1,0 +1,19 @@
+[project]
+name = "home-auto-client"
+version = "0.0.1"
+description = "Softmesh client service. Initial scope: an echo server that replies to every direct message."
+requires-python = ">=3.12"
+dependencies = [
+    "softmesh-stack",
+    "aiomqtt>=2.3",
+]
+
+[project.scripts]
+home-auto-client = "home_auto_client.__main__:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/home_auto_client"]

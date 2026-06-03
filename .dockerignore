@@ -1,0 +1,19 @@
+# Keep the build context small and reproducible. uv only needs the workspace
+# manifests, uv.lock and the package sources under packages/.
+.git
+.venv
+**/.venv
+**/__pycache__
+**/*.pyc
+.state
+pytest-of-*
+**/.pytest_cache
+**/.ruff_cache
+*.log
+tools
+tests
+node_modules
+.DS_Store
+Dockerfile
+.dockerignore
+build.sh

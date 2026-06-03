@@ -1,0 +1,44 @@
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+.Spotlight-V100
+.Trashes
+
+# Linux
+*~
+.nfs*
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# uv / venv
+.venv/
+venv/
+
+# Editor
+.idea/
+.vscode/
+*.swp
+.claude/
+
+# Local build/deploy helper (private registry config)
+build.sh
+
+# Local state
+.env
+.env.local
+*.identity
+*.sqlite
+*.sqlite-journal
+
+# Generated QR codes
+*-qr.png
