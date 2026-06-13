@@ -31,11 +31,13 @@ from softmesh_stack.advert import (
 )
 from softmesh_stack.identity import Identity, resolve_identity
 from softmesh_stack.messaging import (
+    GrpTxtMsg,
     build_ack_packet,
     build_path_packet,
     deliver_txt_msg_with_ack,
     parse_ack_payload,
     reverse_path,
+    try_decode_grp_txt,
     try_decrypt_path_msg,
     try_decrypt_req_msg,
     try_decrypt_txt_msg,
@@ -251,13 +253,23 @@ class EchoServer:
             self.save_contact_cache()
 
     async def handle_txt_msg(self, packet: Packet, mqtt: aiomqtt.Client) -> None:
-        if not packet.payload or packet.payload[0] != self.identity.address:
+        if not packet.payload:
+            return
+        dest_hash = packet.payload[0]
+        log.debug(
+            "TXT_MSG arrived: dest=%#04x our=%#04x route=%s hops=%d",
+            dest_hash,
+            self.identity.address,
+            getattr(packet.route_type, "name", packet.route_type),
+            packet.hash_count,
+        )
+        if dest_hash != self.identity.address:
             return  # not addressed to us
         src_hash = packet.payload[1] if len(packet.payload) > 1 else None
         candidates = list(self._contacts.get(src_hash, {}).items()) if src_hash is not None else []
         if not candidates:
-            log.debug(
-                "TXT_MSG to us from src_hash=%#04x but no candidate contacts known yet",
+            log.info(
+                "TXT_MSG to us from src_hash=%#04x but sender not in contacts yet",
                 src_hash if src_hash is not None else 0,
             )
             return
@@ -295,10 +307,16 @@ class EchoServer:
                 name="deliver_echo",
             )
             self._tasks.add(task)
-            task.add_done_callback(self._tasks.discard)
+
+            def _on_done(t: asyncio.Task[None]) -> None:
+                self._tasks.discard(t)
+                if not t.cancelled() and (exc := t.exception()) is not None:
+                    log.error("deliver_echo failed: %r", exc)
+
+            task.add_done_callback(_on_done)
             return
-        log.debug(
-            "TXT_MSG to us from src_hash=%#04x did not decrypt for any of %d candidates",
+        log.info(
+            "TXT_MSG to us from src_hash=%#04x did not decrypt for any of %d candidate(s)",
             src_hash if src_hash is not None else 0,
             len(candidates),
         )
@@ -423,6 +441,34 @@ class EchoServer:
             len(candidates),
         )
 
+    def handle_grp_txt(self, packet: Packet) -> None:
+        if not self.config.monitor_channel_keys or not packet.payload or len(packet.payload) < 2:
+            return
+        sender_hash = packet.payload[1]
+        for channel_key in self.config.monitor_channel_keys:
+            msg = try_decode_grp_txt(packet.payload, channel_key)
+            if msg is None:
+                continue
+            candidates = self._contacts.get(sender_hash, {})
+            if not candidates:
+                log.debug(
+                    "channel msg ch=%#04x from unknown sender_hash=%#04x: %r",
+                    msg.channel_hash,
+                    sender_hash,
+                    msg.text,
+                )
+                return
+            name_filter = self.config.monitor_name_filter.lower()
+            for name in candidates.values():
+                if not name_filter or name_filter in name.lower():
+                    log.info(
+                        "channel msg from %s (ch=%#04x): %r",
+                        name,
+                        msg.channel_hash,
+                        msg.text,
+                    )
+            return
+
     async def deliver_echo(
         self,
         *,
@@ -525,16 +571,32 @@ async def run(config: EchoConfig) -> None:
                 except ValueError as e:
                     log.debug("rx undecodable: %s", e)
                     continue
-                if packet.payload_type == PayloadType.ADVERT:
-                    server.handle_advert(packet)
-                elif packet.payload_type == PayloadType.ACK:
-                    server.handle_ack(packet)
-                elif packet.payload_type == PayloadType.PATH:
-                    await server.handle_path_msg(packet, mqtt)
-                elif packet.payload_type == PayloadType.REQ:
-                    await server.handle_req_msg(packet, mqtt)
-                elif packet.payload_type == PayloadType.TXT_MSG:
-                    await server.handle_txt_msg(packet, mqtt)
+                log.debug(
+                    "rx: type=%s route=%s hops=%d payload=%dB",
+                    getattr(packet.payload_type, "name", packet.payload_type),
+                    getattr(packet.route_type, "name", packet.route_type),
+                    packet.hash_count,
+                    len(packet.payload),
+                )
+                try:
+                    if packet.payload_type == PayloadType.ADVERT:
+                        server.handle_advert(packet)
+                    elif packet.payload_type == PayloadType.ACK:
+                        server.handle_ack(packet)
+                    elif packet.payload_type == PayloadType.PATH:
+                        await server.handle_path_msg(packet, mqtt)
+                    elif packet.payload_type == PayloadType.REQ:
+                        await server.handle_req_msg(packet, mqtt)
+                    elif packet.payload_type == PayloadType.TXT_MSG:
+                        await server.handle_txt_msg(packet, mqtt)
+                    elif packet.payload_type == PayloadType.GRP_TXT:
+                        server.handle_grp_txt(packet)
+                except Exception:
+                    log.exception(
+                        "error handling %s packet (%d bytes); continuing",
+                        getattr(packet.payload_type, "name", packet.payload_type),
+                        len(payload),
+                    )
 
         try:
             async with asyncio.TaskGroup() as tg:

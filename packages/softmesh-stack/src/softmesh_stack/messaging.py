@@ -1,20 +1,31 @@
-"""PAYLOAD_TYPE_TXT_MSG and PAYLOAD_TYPE_ACK codecs.
+"""PAYLOAD_TYPE_TXT_MSG, PAYLOAD_TYPE_GRP_TXT, and PAYLOAD_TYPE_ACK codecs.
 
-A direct text message packet's payload is laid out as:
+A direct text message (TXT_MSG) payload:
 
     dest_hash (1 byte)   PATH_HASH_SIZE
     src_hash  (1 byte)
     MAC       (2 bytes)  truncated HMAC-SHA256 over the ciphertext
     ciphertext           AES-128-ECB, zero-padded to a 16-byte multiple
 
-The inner plaintext (after MAC verification + AES decryption + trimming the
-zero pad) is:
+A group/channel text message (GRP_TXT) payload uses the same MAC+cipher
+scheme but with a channel-derived key instead of an ECDH shared secret:
+
+    channel_hash (1 byte)  first byte of SHA-256(channel_secret)
+    sender_hash  (1 byte)  path_hash of the sender
+    MAC          (2 bytes)
+    ciphertext
+
+Inner plaintext (both TXT_MSG and GRP_TXT after decryption):
 
     timestamp (4 bytes LE)
     attempt   (1 byte; low 2 bits are the retry counter)
     text                  (null-terminated UTF-8 string)
 
-The sender computes a 4-byte ACK hash for the message:
+The channel key passed to `try_decode_grp_txt` must be the full SHA-256 of
+the channel secret/password (32 bytes), matching MeshCore's key derivation.
+For the default public channel (empty secret): SHA-256(b"").
+
+The sender computes a 4-byte ACK hash for TXT_MSG:
 
     ack_hash = SHA256(plaintext_up_to_and_including_text || sender_pub_key)[:4]
 
@@ -102,6 +113,64 @@ class ReqMsg:
     src_hash: int
     timestamp: int
     data: bytes
+
+
+@dataclass(frozen=True, slots=True)
+class GrpTxtMsg:
+    """A decoded PAYLOAD_TYPE_GRP_TXT (group/channel) message."""
+
+    channel_hash: int
+    sender_hash: int
+    timestamp: int
+    attempt: int
+    text: str
+    txt_type: int = TXT_TYPE_PLAIN
+
+
+GRP_TXT_HEADER_SIZE = 2 * crypto.PATH_HASH_SIZE  # channel_hash + sender_hash
+
+
+def channel_key_from_secret(secret: str) -> bytes:
+    """Derive the 32-byte channel key from the channel secret/password.
+
+    Pass the result directly to `try_decode_grp_txt`.  For the default public
+    channel (no password) use ``channel_key_from_secret("")``.
+    """
+    return crypto.sha256(secret.encode("utf-8"))
+
+
+def try_decode_grp_txt(payload: bytes, channel_key: bytes) -> GrpTxtMsg | None:
+    """Try to decode a GRP_TXT payload using the given channel key.
+
+    `channel_key` must be 32 bytes — the SHA-256 of the channel secret, as
+    returned by `channel_key_from_secret`.  Returns None if the MAC does not
+    verify (wrong key or corrupt packet).
+    """
+    if len(payload) < GRP_TXT_HEADER_SIZE + crypto.CIPHER_MAC_SIZE + crypto.CIPHER_BLOCK_SIZE:
+        return None
+    channel_hash = payload[0]
+    sender_hash = payload[1]
+    plaintext = crypto.mac_then_decrypt(channel_key, payload[GRP_TXT_HEADER_SIZE:])
+    if plaintext is None:
+        return None
+    if len(plaintext) < TIMESTAMP_SIZE + ATTEMPT_SIZE + 1:
+        return None
+    timestamp = int.from_bytes(plaintext[:TIMESTAMP_SIZE], "little")
+    flags = plaintext[TIMESTAMP_SIZE]
+    attempt = flags & ATTEMPT_MASK
+    txt_type = flags >> TXT_TYPE_SHIFT
+    text_bytes = plaintext[TIMESTAMP_SIZE + ATTEMPT_SIZE:]
+    null_at = text_bytes.find(b"\x00")
+    if null_at >= 0:
+        text_bytes = text_bytes[:null_at]
+    return GrpTxtMsg(
+        channel_hash=channel_hash,
+        sender_hash=sender_hash,
+        timestamp=timestamp,
+        attempt=attempt,
+        text=text_bytes.decode("utf-8", errors="replace"),
+        txt_type=txt_type,
+    )
 
 
 def compose_plaintext(
