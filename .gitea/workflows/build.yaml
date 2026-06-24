@@ -30,9 +30,13 @@ jobs:
 
       - name: Build and push ${{ matrix.service }}
         run: |
+          SHORT_SHA=$(git rev-parse --short HEAD)
+          REGISTRY=gitea.other.svc.cluster.local:3000/${{ github.repository_owner }}
           docker build \
             --build-arg "SERVICE=${{ matrix.service }}" \
-            --tag "gitea.other.svc.cluster.local:3000/${{ github.repository_owner }}/${{ matrix.service }}:latest" \
+            --tag "${REGISTRY}/${{ matrix.service }}:${SHORT_SHA}" \
+            --tag "${REGISTRY}/${{ matrix.service }}:latest" \
             --file Dockerfile \
             .
-          docker push "gitea.other.svc.cluster.local:3000/${{ github.repository_owner }}/${{ matrix.service }}:latest"
+          docker push "${REGISTRY}/${{ matrix.service }}:${SHORT_SHA}"
+          docker push "${REGISTRY}/${{ matrix.service }}:latest"
