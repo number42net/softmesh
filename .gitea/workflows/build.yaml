@@ -1,0 +1,38 @@
+---
+name: Build and Push Images
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    container:
+      image: data.forgejo.org/oci/node:lts
+    permissions:
+      packages: write
+    strategy:
+      matrix:
+        service: [mesh-gateway, room-server, home-auto-client, observer]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install docker CLI
+        run: apt-get update && apt-get install -y --no-install-recommends docker.io
+
+      - name: Log in to Forgejo registry
+        run: |
+          echo "${{ secrets.REGISTRY_TOKEN }}" | \
+            docker login gitea.other.svc.cluster.local:3000 -u "${{ github.actor }}" --password-stdin
+
+      - name: Build and push ${{ matrix.service }}
+        run: |
+          docker build \
+            --build-arg "SERVICE=${{ matrix.service }}" \
+            --tag "gitea.other.svc.cluster.local:3000/${{ github.repository_owner }}/${{ matrix.service }}:latest" \
+            --file Dockerfile \
+            .
+          docker push "gitea.other.svc.cluster.local:3000/${{ github.repository_owner }}/${{ matrix.service }}:latest"
