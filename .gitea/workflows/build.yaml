@@ -40,3 +40,14 @@ jobs:
             .
           docker push "${REGISTRY}/${{ matrix.service }}:${SHORT_SHA}"
           docker push "${REGISTRY}/${{ matrix.service }}:latest"
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    container:
+      image: gitea.other.svc.cluster.local:3000/${{ github.repository_owner }}/kubernetes-repo-runner:latest
+    steps:
+      - name: Rollout restart
+        run: |
+          kubectl rollout restart deployment/mesh-gateway deployment/room-server deployment/home-auto-client deployment/observer -n meshcore
+          kubectl rollout status deployment/mesh-gateway deployment/room-server deployment/home-auto-client deployment/observer -n meshcore --timeout=300s
