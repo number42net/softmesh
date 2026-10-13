@@ -48,7 +48,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 25
     container:
-      image: gitea.other.svc.cluster.local:3000/${{ github.repository_owner }}/kubernetes-repo-runner:latest
+      image: gitea.other.svc.cluster.local:3000/${{ github.repository_owner }}/forgejo-ci-tools:latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4
