@@ -30,24 +30,14 @@ jobs:
 
       - name: Build and push ${{ matrix.service }}
         run: |
-          SHORT_SHA=$(git rev-parse --short HEAD)
+          SHORT_SHA=$(git rev-parse --short=7 HEAD)
+          IMAGE_TAG="${{ github.run_number }}-${SHORT_SHA}"
           REGISTRY=gitea.other.svc.cluster.local:3000/${{ github.repository_owner }}
           docker build \
             --build-arg "SERVICE=${{ matrix.service }}" \
-            --tag "${REGISTRY}/${{ matrix.service }}:${SHORT_SHA}" \
+            --tag "${REGISTRY}/${{ matrix.service }}:${IMAGE_TAG}" \
             --tag "${REGISTRY}/${{ matrix.service }}:latest" \
             --file Dockerfile \
             .
-          docker push "${REGISTRY}/${{ matrix.service }}:${SHORT_SHA}"
+          docker push "${REGISTRY}/${{ matrix.service }}:${IMAGE_TAG}"
           docker push "${REGISTRY}/${{ matrix.service }}:latest"
-
-  deploy:
-    needs: build
-    runs-on: ubuntu-latest
-    container:
-      image: gitea.other.svc.cluster.local:3000/${{ github.repository_owner }}/kubernetes-repo-runner:latest
-    steps:
-      - name: Rollout restart
-        run: |
-          kubectl rollout restart deployment/mesh-gateway deployment/room-server deployment/home-auto-client deployment/observer -n meshcore
-          kubectl rollout status deployment/mesh-gateway deployment/room-server deployment/home-auto-client deployment/observer -n meshcore --timeout=300s
