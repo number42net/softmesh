@@ -41,3 +41,18 @@ jobs:
             .
           docker push "${REGISTRY}/${{ matrix.service }}:${IMAGE_TAG}"
           docker push "${REGISTRY}/${{ matrix.service }}:latest"
+  flux-deploy:
+    name: Wait for Flux deployment
+    needs: build
+    if: ${{ vars.FLUX_CD_ENABLED == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    container:
+      image: gitea.other.svc.cluster.local:3000/${{ github.repository_owner }}/kubernetes-repo-runner:latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Watch image promotion and Helm release
+        env:
+          FLUX_OBSERVER_KUBECONFIG: ${{ secrets.FLUX_OBSERVER_KUBECONFIG }}
+        run: flux-app-wait '${{ github.run_number }}' '${{ github.sha }}' mesh-gateway room-server home-auto-client observer
